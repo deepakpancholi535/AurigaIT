@@ -7,10 +7,12 @@ A production-oriented, high-performance pharmacy inventory management and FEFO (
 ## Key Features
 
 - **Strict FEFO Dispensing Engine**: Server-side calculation automatically picks in-date stock sorted deterministically by earliest expiry date, earliest received date, and batch ID.
+- **Level 1 — T2 Automation (`POST /clock`)**: Daily job that flags batches expiring within 7 days, automatically quarantines expired batches (`quarantined = 1`), and reports counts.
+- **Level 2 — T4 Messy Data Import (`POST /api/batches/import`)**: Normalization parser handling dirty strings (e.g. `'10 units'`), mixed date formats (`DD/MM/YYYY` vs ISO `YYYY-MM-DD`), nulls, and duplicate row deduplication with a `{ imported, deduped, rejected }` report.
+- **Level 3 — T1 Notification Service (`/outbox`)**: Low-stock re-order trigger that emits notification events to `/outbox` whenever sellable stock drops below threshold.
 - **Atomic Transaction Safety**: SQLite `IMMEDIATE` write transactions serialize concurrent dispense requests, guaranteeing zero overselling and zero race conditions.
 - **Server-Authoritative UTC Dates**: Expiry dates and sellability predicates are calculated in UTC (`YYYY-MM-DD`). Client system clock drift never compromises patient safety.
 - **Audit Compliance Logging**: Every dispensing action (successful or rejected) writes an immutable audit log with full line-item batch breakdowns and idempotency key support.
-- **Accessible & Modern UI**: Styled with a custom design system, WAI-ARIA compliant tabbed navigation, keyboard controls, custom modal dialogs (replacing legacy browser `alert`/`prompt`), toast notifications, and debounced search.
 
 ---
 
@@ -63,7 +65,7 @@ AurigaIT_Round2/
 │   ├── styles.css              # Custom CSS Design System, Tokens & Animations
 │   └── app.js                  # Frontend Application Logic, Fetch & Modals
 ├── test/
-│   └── fefo.test.js            # Vitest Integration & Invariant Test Suite
+│   └── fefo.test.js            # Vitest Integration & Invariant Test Suite (13 tests)
 ├── .env.example                # Sample Environment Variables
 ├── package.json                # Project Dependencies & Scripts
 ├── pharmacy.sqlite             # SQLite Database (Auto-created on start/seed)
@@ -101,12 +103,12 @@ All mutating endpoints require an authentication header:
 | `POST` | `/api/dispense` | Execute FEFO dispense (`{ medicine_id, quantity, idempotency_key? }`) |
 | `GET` | `/api/search` | Search stock by medicine or generic name (`?q=paracetamol`) |
 
-### Compliance & Expiry Monitoring
+### Advanced Twist Levels (1, 2, and 3)
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/alerts/expiring-soon` | Batches expiring within N days (`?days=30`) |
-| `GET` | `/api/alerts/expired` | Currently expired batches requiring shelf removal |
-| `GET` | `/api/dispense-log` | Paginated immutable audit trail (`?page=1&limit=25`) |
+| `POST` | `/clock` | Level 1: Flag 7-day expiring stock, quarantine expired stock, report counts |
+| `POST` | `/api/batches/import` | Level 2: Import messy batch list returning `{ imported, deduped, rejected }` |
+| `GET` | `/outbox` | Level 3: Notification Service outbox queue for low-stock re-order alerts |
 
 ---
 

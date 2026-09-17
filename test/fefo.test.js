@@ -1,22 +1,160 @@
-import { describe,it,expect,beforeEach,afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
-process.env.NODE_ENV='test'; process.env.DATABASE_FILE=':memory:';
-const {default:app,db}=await import('../server.js');
+
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_FILE = ':memory:';
+
+const { default: app, db, outbox } = await import('../server.js');
 let auth;
-beforeEach(async()=>{db.exec('DELETE FROM dispense_lines; DELETE FROM dispense_transactions; DELETE FROM batches; DELETE FROM medicines;');const r=await request(app).post('/api/auth/login').send({username:'pharmacist',password:'change-me'});auth=r.body.token;});
-afterAll(()=>db.close());
-const post=(url,body)=>request(app).post(url).set('Authorization',`Bearer ${auth}`).send(body);
-const med=async(name='Paracetamol 500mg')=>(await post('/api/medicines',{name,unit:'tablet'})).body;
-const batch=async(id,batch_no,quantity,expiry_date,received_date)=>post(`/api/medicines/${id}/batches`,{batch_no,quantity,expiry_date,received_date});
-describe('FEFO pharmacy invariants',()=>{
-it('batch expiring exactly today is sellable and dispensable',async()=>{const m=await med();await batch(m.id,'TODAY',2,new Date().toISOString().slice(0,10));const s=await request(app).get(`/api/medicines/${m.id}`);expect(s.body.sellable_stock).toBe(2);expect((await post('/api/dispense',{medicine_id:m.id,quantity:2})).status).toBe(200)});
-it('expired yesterday is excluded and cannot be dispensed',async()=>{const m=await med();await batch(m.id,'OLD',4,'2020-01-01');expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(0);expect((await post('/api/dispense',{medicine_id:m.id,quantity:1})).status).toBe(409)});
-it('spans batches in deterministic FEFO order and records audit breakdown',async()=>{const m=await med();await batch(m.id,'LATE',3,'2099-02-01','2024-01-01');await batch(m.id,'EARLY',2,'2099-01-01','2024-02-01');const r=await post('/api/dispense',{medicine_id:m.id,quantity:4});expect(r.status).toBe(200);expect(r.body.breakdown.map(x=>x.batch_no)).toEqual(['EARLY','LATE']);expect(r.body.breakdown.map(x=>x.quantity_taken)).toEqual([2,2])});
-it('rejects zero, negative, non-integer and missing quantities with 400',async()=>{const m=await med();for(const quantity of [0,-1,1.2,'x',undefined])expect((await post('/api/dispense',{medicine_id:m.id,quantity})).status).toBe(400)});
-it('is all-or-nothing when one more than stock is requested',async()=>{const m=await med();await batch(m.id,'A',2,'2099-01-01');expect((await post('/api/dispense',{medicine_id:m.id,quantity:3})).status).toBe(409);expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(2)});
-it('enforces scoped duplicate batch numbers and allows reuse across medicines',async()=>{const a=await med('Aspirin'),b=await med('Ibuprofen');expect((await batch(a.id,'SAME',1,'2099-01-01')).status).toBe(201);expect((await batch(a.id,'SAME',1,'2099-01-01')).status).toBe(409);expect((await batch(b.id,'SAME',1,'2099-01-01')).status).toBe(201)});
-it('search is case insensitive, partial, explicit for no match, and injection safe',async()=>{const m=await med();await batch(m.id,'A',1,'2099-01-01');expect((await request(app).get('/api/search?q=PARA')).body.found).toBe(true);expect((await request(app).get('/api/search?q=%27%20OR%201%3D1--')).body.found).toBe(false);expect((await request(app).get('/api/search?q=none')).body.found).toBe(false);expect((await request(app).get('/api/search?q=%20')).status).toBe(400)});
-it('alerts separate today/threshold, expired, and omit zero quantities',async()=>{const m=await med();const t=new Date();const fmt=d=>d.toISOString().slice(0,10);const today=fmt(t), soon=new Date(t);soon.setUTCDate(t.getUTCDate()+3);const far=new Date(t);far.setUTCDate(t.getUTCDate()+40);await batch(m.id,'TODAY',1,today);await batch(m.id,'SOON',1,fmt(soon));await batch(m.id,'FAR',1,fmt(far));await batch(m.id,'EXPIRED',1,'2020-01-01');const a=await request(app).get('/api/alerts/expiring-soon?days=3');expect(a.body.data.map(x=>x.batch_no)).toEqual(['TODAY','SOON']);expect((await request(app).get('/api/alerts/expired')).body.data.map(x=>x.batch_no)).toContain('EXPIRED')});
-it('returns 404 for an unknown medicine and validates batches',async()=>{expect((await post('/api/dispense',{medicine_id:99999,quantity:1})).status).toBe(404);const m=await med();expect((await batch(m.id,'BAD',0,'2099-01-01')).status).toBe(400);expect((await batch(m.id,'DATE',1,'not-a-date')).status).toBe(400)});
-it('supports idempotent retries without double deduction',async()=>{const m=await med();await batch(m.id,'A',3,'2099-01-01');const a=await post('/api/dispense',{medicine_id:m.id,quantity:2,idempotency_key:'retry-1'}),b=await post('/api/dispense',{medicine_id:m.id,quantity:2,idempotency_key:'retry-1'});expect(a.body.transaction_id).toBe(b.body.transaction_id);expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(1)});
+
+beforeEach(async () => {
+  db.exec('DELETE FROM dispense_lines; DELETE FROM dispense_transactions; DELETE FROM batches; DELETE FROM medicines;');
+  outbox.length = 0;
+  const r = await request(app).post('/api/auth/login').send({ username: 'pharmacist', password: 'change-me' });
+  auth = r.body.token;
+});
+
+afterAll(() => db.close());
+
+const post = (url, body) => request(app).post(url).set('Authorization', `Bearer ${auth}`).send(body);
+const med = async (name = 'Paracetamol 500mg') => (await post('/api/medicines', { name, unit: 'tablet' })).body;
+const batch = async (id, batch_no, quantity, expiry_date, received_date) => 
+  post(`/api/medicines/${id}/batches`, { batch_no, quantity, expiry_date, received_date });
+
+describe('FEFO pharmacy invariants', () => {
+  it('batch expiring exactly today is sellable and dispensable', async () => {
+    const m = await med();
+    await batch(m.id, 'TODAY', 2, new Date().toISOString().slice(0, 10));
+    const s = await request(app).get(`/api/medicines/${m.id}`);
+    expect(s.body.sellable_stock).toBe(2);
+    expect((await post('/api/dispense', { medicine_id: m.id, quantity: 2 })).status).toBe(200);
+  });
+
+  it('expired yesterday is excluded and cannot be dispensed', async () => {
+    const m = await med();
+    await batch(m.id, 'OLD', 4, '2020-01-01');
+    expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(0);
+    expect((await post('/api/dispense', { medicine_id: m.id, quantity: 1 })).status).toBe(409);
+  });
+
+  it('spans batches in deterministic FEFO order and records audit breakdown', async () => {
+    const m = await med();
+    await batch(m.id, 'LATE', 3, '2099-02-01', '2024-01-01');
+    await batch(m.id, 'EARLY', 2, '2099-01-01', '2024-02-01');
+    const r = await post('/api/dispense', { medicine_id: m.id, quantity: 4 });
+    expect(r.status).toBe(200);
+    expect(r.body.breakdown.map(x => x.batch_no)).toEqual(['EARLY', 'LATE']);
+    expect(r.body.breakdown.map(x => x.quantity_taken)).toEqual([2, 2]);
+  });
+
+  it('rejects zero, negative, non-integer and missing quantities with 400', async () => {
+    const m = await med();
+    for (const quantity of [0, -1, 1.2, 'x', undefined]) {
+      expect((await post('/api/dispense', { medicine_id: m.id, quantity })).status).toBe(400);
+    }
+  });
+
+  it('is all-or-nothing when one more than stock is requested', async () => {
+    const m = await med();
+    await batch(m.id, 'A', 2, '2099-01-01');
+    expect((await post('/api/dispense', { medicine_id: m.id, quantity: 3 })).status).toBe(409);
+    expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(2);
+  });
+
+  it('enforces scoped duplicate batch numbers and allows reuse across medicines', async () => {
+    const a = await med('Aspirin'), b = await med('Ibuprofen');
+    expect((await batch(a.id, 'SAME', 1, '2099-01-01')).status).toBe(201);
+    expect((await batch(a.id, 'SAME', 1, '2099-01-01')).status).toBe(409);
+    expect((await batch(b.id, 'SAME', 1, '2099-01-01')).status).toBe(201);
+  });
+
+  it('search is case insensitive, partial, explicit for no match, and injection safe', async () => {
+    const m = await med();
+    await batch(m.id, 'A', 1, '2099-01-01');
+    expect((await request(app).get('/api/search?q=PARA')).body.found).toBe(true);
+    expect((await request(app).get('/api/search?q=%27%20OR%201%3D1--')).body.found).toBe(false);
+    expect((await request(app).get('/api/search?q=none')).body.found).toBe(false);
+    expect((await request(app).get('/api/search?q=%20')).status).toBe(400);
+  });
+
+  it('alerts separate today/threshold, expired, and omit zero quantities', async () => {
+    const m = await med();
+    const t = new Date();
+    const fmt = d => d.toISOString().slice(0, 10);
+    const today = fmt(t), soon = new Date(t);
+    soon.setUTCDate(t.getUTCDate() + 3);
+    const far = new Date(t);
+    far.setUTCDate(t.getUTCDate() + 40);
+    await batch(m.id, 'TODAY', 1, today);
+    await batch(m.id, 'SOON', 1, fmt(soon));
+    await batch(m.id, 'FAR', 1, fmt(far));
+    await batch(m.id, 'EXPIRED', 1, '2020-01-01');
+    const a = await request(app).get('/api/alerts/expiring-soon?days=3');
+    expect(a.body.data.map(x => x.batch_no)).toEqual(['TODAY', 'SOON']);
+    expect((await request(app).get('/api/alerts/expired')).body.data.map(x => x.batch_no)).toContain('EXPIRED');
+  });
+
+  it('returns 404 for an unknown medicine and validates batches', async () => {
+    expect((await post('/api/dispense', { medicine_id: 99999, quantity: 1 })).status).toBe(404);
+    const m = await med();
+    expect((await batch(m.id, 'BAD', 0, '2099-01-01')).status).toBe(400);
+    expect((await batch(m.id, 'DATE', 1, 'not-a-date')).status).toBe(400);
+  });
+
+  it('supports idempotent retries without double deduction', async () => {
+    const m = await med();
+    await batch(m.id, 'A', 3, '2099-01-01');
+    const a = await post('/api/dispense', { medicine_id: m.id, quantity: 2, idempotency_key: 'retry-1' });
+    const b = await post('/api/dispense', { medicine_id: m.id, quantity: 2, idempotency_key: 'retry-1' });
+    expect(a.body.transaction_id).toBe(b.body.transaction_id);
+    expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(1);
+  });
+
+  // Level 1 — T2 (automation) test: POST /clock
+  it('Level 1 — POST /clock flags batches expiring in 7 days and quarantines expired batches', async () => {
+    const m = await med('Clock Med');
+    const todayStr = '2026-05-10';
+    const soonStr = '2026-05-14';
+    const expiredStr = '2026-05-01';
+
+    await batch(m.id, 'B-SOON', 10, soonStr);
+    await batch(m.id, 'B-EXP', 5, expiredStr);
+
+    const res = await request(app).post('/clock').send({ date: todayStr });
+    expect(res.status).toBe(200);
+    expect(res.body.date).toBe(todayStr);
+    expect(res.body.expiring_soon_count).toBe(1);
+    expect(res.body.quarantined_count).toBe(1);
+  });
+
+  // Level 2 — T4 (messy data) test: POST /api/batches/import
+  it('Level 2 — POST /api/batches/import normalizes messy batch lists with report', async () => {
+    const m = await med('Import Med');
+    const items = [
+      { medicine_id: m.id, batch_no: 'M-101', quantity: '10 units', expiry_date: '15/06/2030' },
+      { medicine_id: m.id, batch_no: 'M-101', quantity: '20 units', expiry_date: '15/06/2030' }, // duplicate
+      { medicine_id: m.id, batch_no: 'M-BAD', quantity: 'invalid', expiry_date: 'bad-date' } // rejected
+    ];
+
+    const res = await post('/api/batches/import', { items });
+    expect(res.status).toBe(200);
+    expect(res.body.imported).toBe(1);
+    expect(res.body.deduped).toBe(1);
+    expect(res.body.rejected).toBe(1);
+  });
+
+  // Level 3 — T1 (integrate) test: Re-order alert via Notification Service (/outbox)
+  it('Level 3 — Emits reorder notification to /outbox when in-date stock drops below threshold', async () => {
+    const m = await med('Reorder Med');
+    await batch(m.id, 'B-LOW', 12, '2099-01-01');
+
+    // Dispense 5 units (stock drops from 12 to 7, below threshold 10)
+    await post('/api/dispense', { medicine_id: m.id, quantity: 5 });
+
+    const outboxRes = await request(app).get('/outbox');
+    expect(outboxRes.status).toBe(200);
+    expect(outboxRes.body.outbox.length).toBeGreaterThan(0);
+    expect(outboxRes.body.outbox[0].type).toBe('reorder_alert');
+    expect(outboxRes.body.outbox[0].medicine_id).toBe(m.id);
+  });
 });
