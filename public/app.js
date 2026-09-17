@@ -83,8 +83,7 @@ function logged() {
 // Level 3 — Outbox Notification Check
 async function checkOutbox() {
   try {
-    const r = await fetch(API_BASE.replace('/api', '') + '/outbox');
-    const d = await r.json();
+    const d = await api('/outbox');
     const count = d.total || (d.outbox ? d.outbox.length : 0);
     $('#outboxBadge').textContent = count;
   } catch (e) {}
@@ -92,8 +91,7 @@ async function checkOutbox() {
 
 $('#outboxBtn').onclick = async () => {
   try {
-    const r = await fetch(API_BASE.replace('/api', '') + '/outbox');
-    const d = await r.json();
+    const d = await api('/outbox');
     const list = d.outbox || [];
     $('#outboxBadge').textContent = list.length;
     
@@ -134,7 +132,7 @@ $('#outboxBtn').onclick = async () => {
 $('#closeOutbox').onclick = () => closeModal($('#outboxDialog'));
 $('#clearOutboxBtn').onclick = async () => {
   try {
-    await fetch(API_BASE.replace('/api', '') + '/outbox', { method: 'DELETE' });
+    await api('/outbox', { method: 'DELETE' });
     showToast('Outbox notifications cleared', 'success');
     $('#outboxBadge').textContent = '0';
     $('#outboxContent').innerHTML = '<p class="muted" style="padding:16px 0;">No re-order notification alerts in outbox.</p>';
@@ -147,12 +145,10 @@ $('#clearOutboxBtn').onclick = async () => {
 $('#runClockBtn').onclick = async () => {
   try {
     const dateVal = $('#clockSimDate').value || new Date().toISOString().slice(0, 10);
-    const r = await fetch(API_BASE.replace('/api', '') + '/clock', {
+    const d = await api('/clock', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: dateVal })
     });
-    const d = await r.json();
     showToast(`Clock set to ${d.date}: ${d.expiring_soon_count} expiring soon, ${d.quarantined_count} quarantined!`, 'info');
     loadInventory(currentInventoryPage);
     loadAlerts();
