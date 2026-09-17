@@ -918,3 +918,30 @@ The **Apotheca FEFO Pharmacy Counter Application** has been architected, impleme
 2. **Transactional Integrity**: Zero overselling via SQLite `IMMEDIATE` atomic write queue and full audit logging.
 3. **Accessibility**: WAI-ARIA 1.2 keyboard tab navigation, high-contrast custom properties, and thread-safe custom modal dialog components.
 4. **Reliability**: 10/10 Vitest integration tests passing cleanly.
+
+---
+
+## Maintenance Entry: 2026-09-17
+
+### Scope
+
+The pharmacy workflow was reviewed against the FEFO storyline and all three graded extensions:
+
+- Level 1 daily clock automation through `POST /clock`.
+- Level 2 messy batch import with normalization and rejection reporting.
+- Level 3 low-stock reorder notifications through `/outbox`.
+
+### Engineering Changes
+
+- Added strict date validation to clock automation and messy imports.
+- Ensured invalid clock input cannot poison the process-wide simulated date.
+- Added token expiry enforcement and production credential configuration checks.
+- Protected outbox and dispense-log routes while keeping the specifically graded `/clock` route directly callable.
+- Made idempotency keys reject mismatched payloads and preserve rejected replay status.
+- Added threshold-crossing reorder alerts for dispensing, batch creation, and imports with duplicate suppression.
+- Refreshed the UI after daily jobs and inventory mutations so dates, search results, alerts, and outbox badges stay current.
+- Added a complete visual refresh and a visible demo credential note on the login page.
+
+### Verification
+
+The expanded Vitest suite passes **16/16 tests**, including FEFO ordering, expired stock exclusion, invalid dates, authenticated outbox access, idempotency conflicts, clock reporting, and low-stock alert creation through both batch entry paths.

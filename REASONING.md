@@ -70,3 +70,27 @@ Unlike general retail (which often uses FIFO/LIFO), pharmacy dispensing MUST fol
 | **Database Engine** | Embedded SQLite (WAL Mode) | Ideal for single-instance, high-performance edge/local pharmacy deployments. For horizontal multi-node clusters, replace with PostgreSQL / MySQL using row-level locking (`SELECT ... FOR UPDATE`). |
 | **Session Management** | In-Memory Token Map | Fast and lightweight for counter terminals. Can be backed by Redis for multi-server token revocation. |
 | **Frontend Framework** | Vanilla JS / CSS Design System | Zero dependency overhead, instant loading speed (< 10ms), and zero build steps required. |
+
+---
+
+## 6. 2026-09-17 Implementation Reasoning Update
+
+### Daily Job Feedback
+
+The `/clock` operation changes sellability by quarantining expired batches; it does not reduce physical quantities. The frontend now reflects that distinction by updating the simulated date, refreshing active search results, reloading inventory and expiry alerts, and displaying the last-run counts beside the control.
+
+### Notification Outbox Behavior
+
+Low-stock notifications are emitted when sellable stock is below the threshold of 10 after a batch is added, imported, or dispensed. A per-medicine active-alert set prevents repeated notifications while stock remains below the threshold. Once stock returns to 10 or more, the state resets and a future threshold crossing can notify again.
+
+### Validation and Safety Decisions
+
+- ISO and `DD/MM/YYYY` dates are accepted only after real calendar validation.
+- Idempotency keys are bound to medicine and requested quantity, preventing accidental replay of a different dispense request.
+- Rejected idempotent dispenses retain HTTP `409` behavior on replay.
+- Production authentication requires explicit environment credentials; the documented `pharmacist` / `change-me` pair is for demo and test usage only.
+- The UI keeps server-provided dates authoritative so browser clock differences do not change inventory decisions.
+
+### Latest Verification
+
+The complete automated suite passes **16/16 tests** with no diagnostics in the backend, frontend JavaScript, HTML, or CSS files.

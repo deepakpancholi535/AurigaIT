@@ -20,7 +20,11 @@
     </div>
     <div style="display: flex; gap: 10px; align-items: center;">
       <!-- Level 3 — Outbox Notification Service Bell -->
-      <button id="outboxBtn" class="quiet hidden" type="button" aria-label="Re-order Outbox Notifications">🔔 Outbox <b id="outboxBadge">0</b></button>
+      <button id="outboxBtn" class="outbox-button quiet hidden" type="button" aria-label="Re-order Outbox Notifications">
+        <span class="outbox-icon" aria-hidden="true">⌁</span>
+        <span>Outbox</span>
+        <b id="outboxBadge">0</b>
+      </button>
       <button id="logout" class="quiet hidden" type="button" aria-label="Sign out of pharmacist session">Sign out</button>
     </div>
   </header>
@@ -74,8 +78,9 @@
             <div class="date" id="today" aria-label="Today's Date"></div>
             <div class="inline" style="gap: 6px;">
               <input type="date" id="clockSimDate" aria-label="Simulated Clock Date" style="width: 130px; font-size: 12px; padding: 4px 6px;">
-              <button type="button" id="runClockBtn" class="quiet" style="padding: 4px 10px; font-size: 12px;" title="Run Daily Clock Job (POST /clock)">⚡ Run Daily Job (POST /clock)</button>
+              <button type="button" id="runClockBtn" class="quiet" style="padding: 4px 10px; font-size: 12px;" title="Run Daily Clock Job (POST /clock)">⚡ Run Daily Job</button>
             </div>
+            <small id="clockStatus" class="clock-status" aria-live="polite">No daily job run yet</small>
           </div>
         </div>
         <form id="search" class="search" role="search">

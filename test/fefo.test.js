@@ -182,4 +182,16 @@ describe('FEFO pharmacy invariants', () => {
     const repeated = await request(app).get('/outbox').set('Authorization', `Bearer ${auth}`);
     expect(repeated.body.outbox.filter(x => x.medicine_id === m.id)).toHaveLength(1);
   });
+
+  it('Level 3 — Emits an outbox alert when low stock is added or imported', async () => {
+    const m = await med('Low Stock Setup');
+    await batch(m.id, 'LOW-ADD', 4, '2099-01-01');
+    let alerts = await request(app).get('/outbox').set('Authorization', `Bearer ${auth}`);
+    expect(alerts.body.outbox.filter(x => x.medicine_id === m.id)).toHaveLength(1);
+
+    const imported = await post('/api/batches/import', { items: [{ medicine_id: m.id, batch_no: 'LOW-IMPORT', quantity: '2 units', expiry_date: '2099-01-01' }] });
+    expect(imported.status).toBe(200);
+    alerts = await request(app).get('/outbox').set('Authorization', `Bearer ${auth}`);
+    expect(alerts.body.outbox.filter(x => x.medicine_id === m.id)).toHaveLength(1);
+  });
 });

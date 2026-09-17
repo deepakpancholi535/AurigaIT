@@ -80,6 +80,12 @@ function logged() {
   }
 }
 
+function updateClockDisplay(date) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return;
+  $('#today').textContent = parsed.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
 // Level 3 — Outbox Notification Check
 async function checkOutbox() {
   try {
@@ -149,10 +155,13 @@ $('#runClockBtn').onclick = async () => {
       method: 'POST',
       body: JSON.stringify({ date: dateVal })
     });
+    updateClockDisplay(d.date);
+    $('#clockStatus').textContent = `Last run: ${d.date} · ${d.expiring_soon_count} expiring · ${d.quarantined_count} quarantined`;
     showToast(`Clock set to ${d.date}: ${d.expiring_soon_count} expiring soon, ${d.quarantined_count} quarantined!`, 'info');
     loadInventory(currentInventoryPage);
     loadAlerts();
     checkOutbox();
+    if ($('#searchInput').value.trim()) performSearch($('#searchInput').value);
   } catch (e) {
     showToast(e.message, 'error');
   }
@@ -420,6 +429,7 @@ $('#importForm').onsubmit = async e => {
 
     showToast(`Import finished: ${d.imported} imported, ${d.deduped} deduped, ${d.rejected} rejected`, 'success');
     loadInventory(currentInventoryPage);
+    checkOutbox();
   } catch (err) {
     $('#importReport').innerHTML = `<p class="error">${esc(err.message)}</p>`;
   }
@@ -521,6 +531,7 @@ $('#batchForm').onsubmit = async e => {
     closeModal($('#batchDialog'));
     showToast('Batch added successfully', 'success');
     loadInventory(currentInventoryPage);
+    checkOutbox();
     if (d.warning) showToast(d.warning, 'info');
   } catch (err) {
     $('#batchError').textContent = err.message;
