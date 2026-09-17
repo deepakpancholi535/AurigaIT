@@ -240,13 +240,21 @@ const performSearch = async query => {
           <div>
             <div class="stock">${m.sellable_stock}</div>
             <small>${esc(m.unit)} sellable</small>
-            ${m.in_date ? `<button type="button" style="margin-top:8px;" onclick="openDispenseModal(${m.id}, '${esc(m.name)}', ${m.sellable_stock})">Dispense</button>` : ''}
+            ${m.in_date ? `<button type="button" class="btn-dispense" style="margin-top:8px;" data-id="${m.id}" data-name="${esc(m.name)}" data-max="${m.sellable_stock}">Dispense</button>` : ''}
           </div>
         </article>
       `).join('')
       : '<div class="result"><strong>No medicines found.</strong><p class="muted">Try searching another name or generic compound.</p></div>';
   } catch (err) {
     $('#searchResults').innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+};
+
+// Event Delegation for Search Results Dispense Button
+$('#searchResults').onclick = e => {
+  const btn = e.target.closest('.btn-dispense');
+  if (btn) {
+    openDispenseModal(Number(btn.dataset.id), btn.dataset.name, Number(btn.dataset.max));
   }
 };
 
