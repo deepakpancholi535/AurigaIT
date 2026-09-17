@@ -110,6 +110,25 @@ describe('FEFO pharmacy invariants', () => {
     expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(1);
   });
 
+  it('rejects idempotency key reuse with a different request', async () => {
+    const m = await med();
+    await batch(m.id, 'A', 3, '2099-01-01');
+    expect((await post('/api/dispense', { medicine_id: m.id, quantity: 1, idempotency_key: 'payload-key' })).status).toBe(200);
+    const conflict = await post('/api/dispense', { medicine_id: m.id, quantity: 2, idempotency_key: 'payload-key' });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect((await request(app).get(`/api/medicines/${m.id}`)).body.sellable_stock).toBe(2);
+  });
+
+  it('replays rejected idempotent dispenses with a conflict status', async () => {
+    const m = await med();
+    await batch(m.id, 'A', 1, '2099-01-01');
+    expect((await post('/api/dispense', { medicine_id: m.id, quantity: 2, idempotency_key: 'rejected-key' })).status).toBe(409);
+    const replay = await post('/api/dispense', { medicine_id: m.id, quantity: 2, idempotency_key: 'rejected-key' });
+    expect(replay.status).toBe(409);
+    expect(replay.body.error.code).toBe('INSUFFICIENT_STOCK');
+  });
+
   // Level 1 — T2 (automation) test: POST /clock
   it('Level 1 — POST /clock flags batches expiring in 7 days and quarantines expired batches', async () => {
     const m = await med('Clock Med');
@@ -120,6 +139,8 @@ describe('FEFO pharmacy invariants', () => {
     await batch(m.id, 'B-SOON', 10, soonStr);
     await batch(m.id, 'B-EXP', 5, expiredStr);
 
+    const invalid = await request(app).post('/clock').send({ date: 'not-a-date' });
+    expect(invalid.status).toBe(400);
     const res = await request(app).post('/clock').send({ date: todayStr });
     expect(res.status).toBe(200);
     expect(res.body.date).toBe(todayStr);
@@ -133,14 +154,15 @@ describe('FEFO pharmacy invariants', () => {
     const items = [
       { medicine_id: m.id, batch_no: 'M-101', quantity: '10 units', expiry_date: '15/06/2030' },
       { medicine_id: m.id, batch_no: 'M-101', quantity: '20 units', expiry_date: '15/06/2030' }, // duplicate
-      { medicine_id: m.id, batch_no: 'M-BAD', quantity: 'invalid', expiry_date: 'bad-date' } // rejected
+      { medicine_id: m.id, batch_no: 'M-BAD', quantity: 'invalid', expiry_date: 'bad-date' }, // rejected
+      { medicine_id: m.id, batch_no: 'M-INVALID-DATE', quantity: '5 units', expiry_date: '31/13/2030' } // rejected
     ];
 
     const res = await post('/api/batches/import', { items });
     expect(res.status).toBe(200);
     expect(res.body.imported).toBe(1);
     expect(res.body.deduped).toBe(1);
-    expect(res.body.rejected).toBe(1);
+    expect(res.body.rejected).toBe(2);
   });
 
   // Level 3 — T1 (integrate) test: Re-order alert via Notification Service (/outbox)
@@ -151,10 +173,13 @@ describe('FEFO pharmacy invariants', () => {
     // Dispense 5 units (stock drops from 12 to 7, below threshold 10)
     await post('/api/dispense', { medicine_id: m.id, quantity: 5 });
 
-    const outboxRes = await request(app).get('/outbox');
+    const outboxRes = await request(app).get('/outbox').set('Authorization', `Bearer ${auth}`);
     expect(outboxRes.status).toBe(200);
     expect(outboxRes.body.outbox.length).toBeGreaterThan(0);
     expect(outboxRes.body.outbox[0].type).toBe('reorder_alert');
     expect(outboxRes.body.outbox[0].medicine_id).toBe(m.id);
+    await post('/api/dispense', { medicine_id: m.id, quantity: 1 });
+    const repeated = await request(app).get('/outbox').set('Authorization', `Bearer ${auth}`);
+    expect(repeated.body.outbox.filter(x => x.medicine_id === m.id)).toHaveLength(1);
   });
 });

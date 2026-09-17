@@ -313,7 +313,7 @@ $('#dispenseForm').onsubmit = async e => {
 window.showBatches = async (id, name) => {
   try {
     const d = await api('/medicines/' + id);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = d.today;
     $('#batchViewTitle').textContent = `${name} · FEFO Batches`;
     const contentHtml = (d.batches && d.batches.length)
       ? `
