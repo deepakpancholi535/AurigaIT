@@ -379,7 +379,7 @@ $('#loadSampleImportBtn').onclick = () => {
 
 $('#importForm').onsubmit = async e => {
   e.preventDefault();
-  const medId = $('#importMedicineSelect').value;
+  let medId = $('#importMedicineSelect').value;
   const rawText = $('#importDataInput').value.trim();
   if (!rawText) return alert('Please enter or paste batch data.');
 
@@ -390,6 +390,11 @@ $('#importForm').onsubmit = async e => {
     return alert('Invalid JSON payload. Click "Load Sample Dirty Data" for a valid format.');
   }
 
+  if (!medId) {
+    const opts = Array.from($('#importMedicineSelect').options).map(o => o.value).filter(Boolean);
+    if (opts.length > 0) medId = opts[0];
+  }
+
   try {
     const d = await api('/batches/import', {
       method: 'POST',
@@ -397,15 +402,15 @@ $('#importForm').onsubmit = async e => {
     });
 
     $('#importReport').innerHTML = `
-      <div style="background:var(--color-surface-alt); padding:12px; border:1px solid var(--color-border); border-radius:4px; font-size:13px;">
-        <strong>Import Report:</strong><br>
+      <div style="background:var(--color-surface-alt); padding:12px; border:1px solid var(--color-border); border-radius:4px; font-size:13px; margin-top:10px;">
+        <strong>Import Report Output:</strong><br>
         <span class="pill" style="margin-right:6px;">Imported: ${d.imported}</span>
         <span class="pill warn" style="margin-right:6px;">Deduped: ${d.deduped}</span>
         <span class="pill bad">Rejected: ${d.rejected}</span>
       </div>
     `;
 
-    showToast(`Import completed: ${d.imported} imported, ${d.deduped} deduped, ${d.rejected} rejected`, 'success');
+    showToast(`Import finished: ${d.imported} imported, ${d.deduped} deduped, ${d.rejected} rejected`, 'success');
     loadInventory(currentInventoryPage);
   } catch (err) {
     $('#importReport').innerHTML = `<p class="error">${esc(err.message)}</p>`;
@@ -471,6 +476,7 @@ $('#medicineForm').onsubmit = async e => {
     e.target.reset();
     showToast('Medicine added successfully', 'success');
     loadInventory(currentInventoryPage);
+    checkOutbox();
   } catch (err) {
     $('#medicineError').textContent = err.message;
   }
