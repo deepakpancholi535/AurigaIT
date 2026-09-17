@@ -18,7 +18,11 @@
         <small>Neighbourhood pharmacy · FEFO counter</small>
       </div>
     </div>
-    <button id="logout" class="quiet hidden" type="button" aria-label="Sign out of pharmacist session">Sign out</button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <!-- Level 3 — Outbox Notification Service Bell -->
+      <button id="outboxBtn" class="quiet hidden" type="button" aria-label="Re-order Outbox Notifications">🔔 Outbox <b id="outboxBadge">0</b></button>
+      <button id="logout" class="quiet hidden" type="button" aria-label="Sign out of pharmacist session">Sign out</button>
+    </div>
   </header>
 
   <!-- Pharmacist Login View -->
@@ -60,7 +64,14 @@
             <h1>Check in-date stock</h1>
             <p class="muted">Search by medicine or generic name. Sellable quantities are calculated server-side.</p>
           </div>
-          <div class="date" id="today" aria-label="Today's Date"></div>
+          <!-- Level 1 — Automation System Clock Controller -->
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+            <div class="date" id="today" aria-label="Today's Date"></div>
+            <div class="inline" style="gap: 6px;">
+              <input type="date" id="clockSimDate" aria-label="Simulated Clock Date" style="width: 130px; font-size: 12px; padding: 4px 6px;">
+              <button type="button" id="runClockBtn" class="quiet" style="padding: 4px 10px; font-size: 12px;" title="Run Daily Clock Job (POST /clock)">⚡ Run Daily Job (POST /clock)</button>
+            </div>
+          </div>
         </div>
         <form id="search" class="search" role="search">
           <label for="searchInput" class="sr-only">Search stock</label>
@@ -77,7 +88,11 @@
             <p class="eyebrow">Stock room</p>
             <h1>Medicines & batches</h1>
           </div>
-          <button id="newMedicine" type="button">+ Add medicine</button>
+          <div style="display: flex; gap: 8px;">
+            <!-- Level 2 — Import Messy Batch List -->
+            <button id="importBatchesBtn" type="button" class="quiet">📥 Import Messy Batches</button>
+            <button id="newMedicine" type="button">+ Add medicine</button>
+          </div>
         </div>
         <div id="inventoryList" aria-live="polite"></div>
         <div id="inventoryPagination" class="pagination hidden"></div>
@@ -175,9 +190,46 @@
     </form>
   </dialog>
 
-  <!-- Custom Dispense Dialog (Replaces native prompt) -->
+  <!-- Level 2 — Import Messy Batches Dialog -->
+  <dialog id="importDialog" aria-labelledby="importDialogTitle" aria-modal="true">
+    <form id="importForm" novalidate>
+      <h2 id="importDialogTitle">Import Messy Batch Data</h2>
+      <p class="muted" style="margin-bottom: 12px;">Paste JSON items or CSV lines containing dirty quantities ('10 units'), mixed date formats ('DD/MM/YYYY'), nulls, or duplicates.</p>
+      <div>
+        <label for="importMedicineSelect">Target Medicine (Optional Default)</label>
+        <select id="importMedicineSelect" name="medicine_id"></select>
+      </div>
+      <div>
+        <label for="importDataInput">Messy Batch JSON Data</label>
+        <textarea id="importDataInput" name="raw_data" rows="6" style="width:100%; font-family:monospace; font-size:12px; padding:8px; border:1px solid var(--color-border);" placeholder='[{"batch_no": "B-DIRTY-1", "quantity": "15 units", "expiry_date": "20/12/2028"}]'></textarea>
+      </div>
+      <div style="margin-top: 8px;">
+        <button type="button" class="quiet" id="loadSampleImportBtn" style="font-size:12px; padding:4px 8px;">Load Sample Dirty Data</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="quiet" id="cancelImport">Cancel</button>
+        <button type="submit">Process & Import</button>
+      </div>
+      <div id="importReport" style="margin-top: 12px;"></div>
+    </form>
+  </dialog>
+
+  <!-- Level 3 — Notification Outbox Dialog -->
+  <dialog id="outboxDialog" aria-labelledby="outboxTitle" aria-modal="true">
+    <div style="padding: 28px;">
+      <h2 id="outboxTitle">Re-order Alert Outbox</h2>
+      <p class="muted" style="margin-bottom: 14px;">Notification Service outbox receiving low-stock re-order triggers (stock &lt; 10 units).</p>
+      <div id="outboxContent"></div>
+      <div class="actions" style="margin-top: 20px;">
+        <button type="button" class="danger" id="clearOutboxBtn">Clear Outbox</button>
+        <button type="button" class="quiet" id="closeOutbox">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Custom Dispense Dialog -->
   <dialog id="dispenseDialog" aria-labelledby="dispenseDialogTitle" aria-modal="true">
-    <form id="dispenseForm" method="dialog" novalidate>
+    <form id="dispenseForm" novalidate>
       <h2 id="dispenseDialogTitle">Dispense Medicine</h2>
       <p id="dispenseMedicineInfo" style="margin-bottom: 12px; font-weight: 500;"></p>
       <div>
@@ -192,7 +244,7 @@
     </form>
   </dialog>
 
-  <!-- Custom Batch Breakdown Modal (Replaces native alert) -->
+  <!-- Custom Batch Breakdown Modal -->
   <dialog id="batchViewDialog" aria-labelledby="batchViewTitle" aria-modal="true">
     <div style="padding: 28px;">
       <h2 id="batchViewTitle">FEFO Batch List</h2>

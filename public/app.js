@@ -29,6 +29,24 @@ const api = async (url, opt = {}) => {
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Safe Modal Helpers
+function openModal(dlg) {
+  if (!dlg) return;
+  if (typeof dlg.showModal === 'function') {
+    try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+  } else {
+    dlg.setAttribute('open', '');
+  }
+}
+
+function closeModal(dlg) {
+  if (!dlg) return;
+  if (typeof dlg.close === 'function') {
+    try { dlg.close(); } catch (e) {}
+  }
+  dlg.removeAttribute('open');
+}
+
 // Toast Notification System
 function showToast(msg, type = 'info') {
   const container = $('#toastContainer');
@@ -51,12 +69,98 @@ function logged() {
   $('#loginView').classList.toggle('hidden', isLoggedIn);
   $('#appView').classList.toggle('hidden', !isLoggedIn);
   $('#logout').classList.toggle('hidden', !isLoggedIn);
+  $('#outboxBtn').classList.toggle('hidden', !isLoggedIn);
   if (isLoggedIn) {
-    $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const todayStr = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    $('#today').textContent = todayStr;
+    if ($('#clockSimDate')) $('#clockSimDate').value = new Date().toISOString().slice(0, 10);
     loadInventory(1);
     loadAlerts();
+    checkOutbox();
   }
 }
+
+// Level 3 — Outbox Notification Check
+async function checkOutbox() {
+  try {
+    const r = await fetch(API_BASE.replace('/api', '') + '/outbox');
+    const d = await r.json();
+    const count = d.total || (d.outbox ? d.outbox.length : 0);
+    $('#outboxBadge').textContent = count;
+  } catch (e) {}
+}
+
+$('#outboxBtn').onclick = async () => {
+  try {
+    const r = await fetch(API_BASE.replace('/api', '') + '/outbox');
+    const d = await r.json();
+    const list = d.outbox || [];
+    $('#outboxBadge').textContent = list.length;
+    
+    const html = list.length
+      ? `
+        <table class="batch-table" role="table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Medicine</th>
+              <th>Sellable Stock</th>
+              <th>Threshold</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map(item => `
+              <tr>
+                <td><span class="pill bad">${esc(item.type)}</span></td>
+                <td><strong>${esc(item.medicine_name)}</strong></td>
+                <td>${item.sellable_stock}</td>
+                <td>${item.threshold}</td>
+                <td><small>${esc(item.timestamp)}</small></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `
+      : '<p class="muted" style="padding:16px 0;">No re-order notification alerts in outbox.</p>';
+      
+    $('#outboxContent').innerHTML = html;
+    openModal($('#outboxDialog'));
+  } catch (e) {
+    showToast('Unable to fetch outbox notifications', 'error');
+  }
+};
+
+$('#closeOutbox').onclick = () => closeModal($('#outboxDialog'));
+$('#clearOutboxBtn').onclick = async () => {
+  try {
+    await fetch(API_BASE.replace('/api', '') + '/outbox', { method: 'DELETE' });
+    showToast('Outbox notifications cleared', 'success');
+    $('#outboxBadge').textContent = '0';
+    $('#outboxContent').innerHTML = '<p class="muted" style="padding:16px 0;">No re-order notification alerts in outbox.</p>';
+  } catch (e) {
+    showToast('Failed to clear outbox', 'error');
+  }
+};
+
+// Level 1 — System Clock POST /clock Automation
+$('#runClockBtn').onclick = async () => {
+  try {
+    const dateVal = $('#clockSimDate').value || new Date().toISOString().slice(0, 10);
+    const r = await fetch(API_BASE.replace('/api', '') + '/clock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: dateVal })
+    });
+    const d = await r.json();
+    showToast(`Clock set to ${d.date}: ${d.expiring_soon_count} expiring soon, ${d.quarantined_count} quarantined!`, 'info');
+    loadInventory(currentInventoryPage);
+    loadAlerts();
+    checkOutbox();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+};
 
 // Login & Logout
 $('#login').onsubmit = async e => {
@@ -81,7 +185,7 @@ $('#logout').onclick = () => {
   showToast('Signed out', 'info');
 };
 
-// Accessible Tab Navigation & Keyboard Handling
+// Accessible Tab Navigation
 const tabButtons = Array.from($$('.tabs button'));
 tabButtons.forEach((b, idx) => {
   b.onclick = () => activateTab(b);
@@ -162,29 +266,7 @@ $('#searchInput').oninput = e => {
   searchTimeout = setTimeout(() => performSearch(e.target.value), 300);
 };
 
-// Safe Modal Helpers
-function openModal(dlg) {
-  if (!dlg) return;
-  if (typeof dlg.showModal === 'function') {
-    try {
-      dlg.showModal();
-    } catch (e) {
-      dlg.setAttribute('open', '');
-    }
-  } else {
-    dlg.setAttribute('open', '');
-  }
-}
-
-function closeModal(dlg) {
-  if (!dlg) return;
-  if (typeof dlg.close === 'function') {
-    try { dlg.close(); } catch (e) {}
-  }
-  dlg.removeAttribute('open');
-}
-
-// Custom Dispense Modal Dialog (Replacing window.prompt)
+// Custom Dispense Modal Dialog
 window.openDispenseModal = (id, name, max) => {
   activeDispenseMed = { id, name, max };
   $('#dispenseMedicineInfo').textContent = `${name} · Available in-date stock: ${max}`;
@@ -217,12 +299,13 @@ $('#dispenseForm').onsubmit = async e => {
     closeModal($('#dispenseDialog'));
     showToast(`Successfully dispensed ${d.dispensed} unit(s) of ${activeDispenseMed.name}!`, 'success');
     performSearch($('#searchInput').value);
+    checkOutbox();
   } catch (err) {
     $('#dispenseError').textContent = err.message;
   }
 };
 
-// Custom Batch Viewer Modal (Replacing window.alert)
+// Custom Batch Viewer Modal
 window.showBatches = async (id, name) => {
   try {
     const d = await api('/medicines/' + id);
@@ -243,13 +326,17 @@ window.showBatches = async (id, name) => {
           <tbody>
             ${d.batches.map((b, i) => {
               const isExpired = b.expiry_date < today;
+              const isQuarantined = !!b.quarantined;
+              let statusPill = '<span class="pill">IN DATE</span>';
+              if (isQuarantined) statusPill = '<span class="pill bad">QUARANTINED</span>';
+              else if (isExpired) statusPill = '<span class="pill bad">EXPIRED</span>';
               return `
                 <tr>
                   <td>${i + 1}</td>
                   <td><strong>${esc(b.batch_no)}</strong></td>
                   <td>${b.quantity}</td>
                   <td>${b.expiry_date}</td>
-                  <td><span class="pill ${isExpired ? 'bad' : ''}">${isExpired ? 'EXPIRED' : 'IN DATE'}</span></td>
+                  <td>${statusPill}</td>
                 </tr>
               `;
             }).join('')}
@@ -266,6 +353,68 @@ window.showBatches = async (id, name) => {
 };
 
 $('#closeBatchView').onclick = () => closeModal($('#batchViewDialog'));
+
+// Level 2 — Import Messy Batches Dialog
+$('#importBatchesBtn').onclick = async () => {
+  try {
+    const d = await api('/medicines?limit=100');
+    const select = $('#importMedicineSelect');
+    select.innerHTML = '<option value="">-- Select Target Medicine (Optional) --</option>' +
+      d.data.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+    
+    $('#importDataInput').value = '';
+    $('#importReport').innerHTML = '';
+    openModal($('#importDialog'));
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+};
+
+$('#cancelImport').onclick = () => closeModal($('#importDialog'));
+
+$('#loadSampleImportBtn').onclick = () => {
+  const sample = [
+    { batch_no: "M-DIRTY-101", quantity: "150 units", expiry_date: "25/12/2028" },
+    { batch_no: "M-DIRTY-101", quantity: "50 units", expiry_date: "25/12/2028" },
+    { batch_no: "M-BAD-99", quantity: "invalid", expiry_date: "not-a-date" }
+  ];
+  $('#importDataInput').value = JSON.stringify(sample, null, 2);
+};
+
+$('#importForm').onsubmit = async e => {
+  e.preventDefault();
+  const medId = $('#importMedicineSelect').value;
+  const rawText = $('#importDataInput').value.trim();
+  if (!rawText) return alert('Please enter or paste batch data.');
+
+  let parsedItems = [];
+  try {
+    parsedItems = JSON.parse(rawText);
+  } catch (x) {
+    return alert('Invalid JSON payload. Click "Load Sample Dirty Data" for a valid format.');
+  }
+
+  try {
+    const d = await api('/batches/import', {
+      method: 'POST',
+      body: JSON.stringify({ medicine_id: medId ? Number(medId) : undefined, items: parsedItems })
+    });
+
+    $('#importReport').innerHTML = `
+      <div style="background:var(--color-surface-alt); padding:12px; border:1px solid var(--color-border); border-radius:4px; font-size:13px;">
+        <strong>Import Report:</strong><br>
+        <span class="pill" style="margin-right:6px;">Imported: ${d.imported}</span>
+        <span class="pill warn" style="margin-right:6px;">Deduped: ${d.deduped}</span>
+        <span class="pill bad">Rejected: ${d.rejected}</span>
+      </div>
+    `;
+
+    showToast(`Import completed: ${d.imported} imported, ${d.deduped} deduped, ${d.rejected} rejected`, 'success');
+    loadInventory(currentInventoryPage);
+  } catch (err) {
+    $('#importReport').innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+};
 
 // Inventory Tab & Pagination
 async function loadInventory(page = 1) {
@@ -389,7 +538,7 @@ async function loadAlerts() {
       ? b.data.map(x => `
         <div class="alert expired">
           <strong>${esc(x.medicine_name)}</strong><br>
-          <small>Batch ${esc(x.batch_no)} · ${x.quantity} unit(s) · expired ${x.expiry_date}</small>
+          <small>Batch ${esc(x.batch_no)} · ${x.quantity} unit(s) · ${x.quarantined ? 'quarantined' : 'expired'} ${x.expiry_date}</small>
         </div>
       `).join('')
       : '<p class="muted">No expired stock found.</p>';
