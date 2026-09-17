@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apotheca · FEFO Counter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Non-blocking Toast Notification Region -->
+  <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+  <header role="banner">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">✚</span>
+      <div>
+        <strong>APOTHECA</strong>
+        <small>Neighbourhood pharmacy · FEFO counter</small>
+      </div>
+    </div>
+    <button id="logout" class="quiet hidden" type="button" aria-label="Sign out of pharmacist session">Sign out</button>
+  </header>
+
+  <!-- Pharmacist Login View -->
+  <main id="loginView" class="login">
+    <section class="paper" aria-labelledby="loginTitle">
+      <p class="eyebrow">Pharmacist access</p>
+      <h1 id="loginTitle">Good morning.</h1>
+      <p class="muted">Sign in to manage in-date inventory and dispense safely.</p>
+      <form id="login" novalidate>
+        <div>
+          <label for="loginUsername">Username</label>
+          <input id="loginUsername" name="username" value="pharmacist" required autocomplete="username" aria-required="true">
+        </div>
+        <div>
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" name="password" type="password" required autocomplete="current-password" aria-required="true">
+        </div>
+        <button type="submit">Open counter</button>
+        <p id="loginError" class="error" role="alert" aria-live="assertive"></p>
+      </form>
+    </section>
+  </main>
+
+  <!-- Main Application View -->
+  <div id="appView" class="hidden">
+    <nav class="tabs" role="tablist" aria-label="Pharmacy counter views">
+      <button id="tab-counter" data-page="counter" class="active" role="tab" aria-selected="true" aria-controls="counter">Counter</button>
+      <button id="tab-inventory" data-page="inventory" role="tab" aria-selected="false" aria-controls="inventory">Inventory</button>
+      <button id="tab-alerts" data-page="alerts" role="tab" aria-selected="false" aria-controls="alerts">Expiry watch <b id="alertBadge">0</b></button>
+      <button id="tab-history" data-page="history" role="tab" aria-selected="false" aria-controls="history">Audit log</button>
+    </nav>
+
+    <main>
+      <!-- Counter Tab Panel -->
+      <section id="counter" class="page" role="tabpanel" aria-labelledby="tab-counter" tabindex="0">
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Dispensing desk</p>
+            <h1>Check in-date stock</h1>
+            <p class="muted">Search by medicine or generic name. Sellable quantities are calculated server-side.</p>
+          </div>
+          <div class="date" id="today" aria-label="Today's Date"></div>
+        </div>
+        <form id="search" class="search" role="search">
+          <label for="searchInput" class="sr-only">Search stock</label>
+          <input id="searchInput" name="q" placeholder="e.g. paracetamol, amoxicillin…" autocomplete="off">
+          <button type="submit">Search stock</button>
+        </form>
+        <div id="searchResults" class="results" aria-live="polite"></div>
+      </section>
+
+      <!-- Inventory Tab Panel -->
+      <section id="inventory" class="page hidden" role="tabpanel" aria-labelledby="tab-inventory" tabindex="0">
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Stock room</p>
+            <h1>Medicines & batches</h1>
+          </div>
+          <button id="newMedicine" type="button">+ Add medicine</button>
+        </div>
+        <div id="inventoryList" aria-live="polite"></div>
+        <div id="inventoryPagination" class="pagination hidden"></div>
+      </section>
+
+      <!-- Expiry Watch Tab Panel -->
+      <section id="alerts" class="page hidden" role="tabpanel" aria-labelledby="tab-alerts" tabindex="0">
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Expiry watch</p>
+            <h1>Use before it’s lost</h1>
+          </div>
+          <label for="days" class="inline">
+            Days ahead 
+            <input id="days" type="number" min="0" max="365" value="30">
+          </label>
+        </div>
+        <div class="alert-grid">
+          <div>
+            <h2>Expiring soon</h2>
+            <div id="soon" aria-live="polite"></div>
+          </div>
+          <div>
+            <h2>Expired · remove from shelf</h2>
+            <div id="expired" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Audit Log Tab Panel -->
+      <section id="history" class="page hidden" role="tabpanel" aria-labelledby="tab-history" tabindex="0">
+        <div class="intro">
+          <div>
+            <p class="eyebrow">Compliance record</p>
+            <h1>Dispense audit log</h1>
+          </div>
+        </div>
+        <div id="historyList" aria-live="polite"></div>
+        <div id="historyPagination" class="pagination hidden"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Add Medicine Dialog -->
+  <dialog id="medicineDialog" aria-labelledby="medicineDialogTitle" aria-modal="true">
+    <form id="medicineForm" novalidate>
+      <h2 id="medicineDialogTitle">Add a medicine</h2>
+      <div>
+        <label for="medName">Name</label>
+        <input id="medName" name="name" required placeholder="e.g. Paracetamol 500mg">
+      </div>
+      <div>
+        <label for="medGeneric">Generic name</label>
+        <input id="medGeneric" name="generic_name" placeholder="e.g. Acetaminophen">
+      </div>
+      <div>
+        <label for="medUnit">Unit</label>
+        <input id="medUnit" name="unit" value="tablet" required placeholder="tablet, capsule, ml...">
+      </div>
+      <div class="actions">
+        <button type="button" value="cancel" class="quiet" id="cancelMedicine">Cancel</button>
+        <button type="submit" value="default">Save medicine</button>
+      </div>
+      <p class="error" id="medicineError" role="alert"></p>
+    </form>
+  </dialog>
+
+  <!-- Add Batch Dialog -->
+  <dialog id="batchDialog" aria-labelledby="batchDialogTitle" aria-modal="true">
+    <form id="batchForm" novalidate>
+      <h2 id="batchDialogTitle">Add batch</h2>
+      <input type="hidden" name="medicine_id" id="batchMedicineId">
+      <p id="batchMedicine" class="muted"></p>
+      <div>
+        <label for="batchNo">Batch number</label>
+        <input id="batchNo" name="batch_no" required placeholder="e.g. BATCH-2026-A">
+      </div>
+      <div>
+        <label for="batchQty">Quantity</label>
+        <input id="batchQty" name="quantity" type="number" min="1" max="10000000" required placeholder="e.g. 100">
+      </div>
+      <div>
+        <label for="batchExpiry">Expiry date</label>
+        <input id="batchExpiry" name="expiry_date" type="date" required>
+      </div>
+      <div>
+        <label for="batchReceived">Received date</label>
+        <input id="batchReceived" name="received_date" type="date">
+      </div>
+      <div class="actions">
+        <button type="button" value="cancel" class="quiet" id="cancelBatch">Cancel</button>
+        <button type="submit" value="default">Save batch</button>
+      </div>
+      <p class="error" id="batchError" role="alert"></p>
+    </form>
+  </dialog>
+
+  <!-- Custom Dispense Dialog (Replaces native prompt) -->
+  <dialog id="dispenseDialog" aria-labelledby="dispenseDialogTitle" aria-modal="true">
+    <form id="dispenseForm" method="dialog" novalidate>
+      <h2 id="dispenseDialogTitle">Dispense Medicine</h2>
+      <p id="dispenseMedicineInfo" style="margin-bottom: 12px; font-weight: 500;"></p>
+      <div>
+        <label for="dispenseQuantity">Quantity to Dispense</label>
+        <input id="dispenseQuantity" type="number" min="1" required placeholder="Enter quantity">
+      </div>
+      <div class="actions">
+        <button type="button" class="quiet" id="cancelDispense">Cancel</button>
+        <button type="submit" id="confirmDispense">Confirm Dispense</button>
+      </div>
+      <p class="error" id="dispenseError" role="alert"></p>
+    </form>
+  </dialog>
+
+  <!-- Custom Batch Breakdown Modal (Replaces native alert) -->
+  <dialog id="batchViewDialog" aria-labelledby="batchViewTitle" aria-modal="true">
+    <div style="padding: 28px;">
+      <h2 id="batchViewTitle">FEFO Batch List</h2>
+      <div id="batchViewContent"></div>
+      <div class="actions" style="margin-top: 20px;">
+        <button type="button" class="quiet" id="closeBatchView">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

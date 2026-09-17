@@ -1,0 +1,9 @@
+{
+  "name": "pharmacy-fefo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"start":"node server.js","dev":"node --watch server.js","test":"vitest run","seed":"node seed.js"},
+  "dependencies": {"better-sqlite3":"^11.7.0","cors":"^2.8.5","express":"^4.21.2","express-rate-limit":"^7.5.0","helmet":"^8.0.0","zod":"^3.24.1"},
+  "devDependencies": {"supertest":"^7.0.0","vitest":"^2.1.8"}
+}
